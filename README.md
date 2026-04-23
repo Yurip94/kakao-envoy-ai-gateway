@@ -144,7 +144,7 @@ schema:
 
 **TO-BE (v0.5)**
 ```yaml
-apiVersion: aigateway.envoyproxy.io/v1beta1
+apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: GatewayConfig
 spec:
   extProc:
@@ -569,7 +569,7 @@ helm install redis bitnami/redis -n ai-gateway-system
 ### 7.2 Step 2: GatewayConfig 설정
 
 ```yaml
-apiVersion: aigateway.envoyproxy.io/v1beta1
+apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: GatewayConfig
 metadata:
   name: memory-enabled-config
