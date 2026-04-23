@@ -25,6 +25,35 @@
 >
 > → v0.5의 확장 기능을 활용해 **직접 구현**해야 합니다.
 
+> ✅ **v0.5로 전환하는 이유**
+>
+> v0.5가 대화 메모리를 제공해서가 아니라, **Custom ExtProc와 GatewayConfig를 통해 Redis 기반 메모리 기능을 직접 붙이기 좋은 구조**를 제공하기 때문입니다.
+
+### 1.1.1 메모리 구현 역할 분담
+
+```text
+Envoy AI Gateway v0.5
+= LLM 요청/응답이 지나가는 관문
+
+Memory ExtProc
+= Redis에서 히스토리를 조회하고 messages를 병합하는 커스텀 처리기
+
+Redis
+= 세션별 대화 히스토리를 저장하는 저장소
+
+GatewayConfig
+= ExtProc 리소스와 REDIS_URL, TTL, MAX_HISTORY_LENGTH 같은 환경변수 관리
+```
+
+따라서 이 프로젝트의 메모리 기능은 Redis 하나가 아니라 다음 조합으로 구현합니다.
+
+```text
+Memory Feature = Envoy AI Gateway v0.5 확장 구조 + Custom ExtProc + Redis
+```
+
+v0.4 → v0.5 마이그레이션은 이 구조를 검증하기 위한 기반 작업입니다.
+v0.4 baseline을 먼저 만들고, v0.5 target에서 `GatewayConfig`, `schema.prefix`, Custom ExtProc 기반 메모리 PoC로 전환합니다.
+
 ### 1.2 프로젝트 범위
 
 | 구분 | 내용 |
@@ -732,9 +761,10 @@ flowchart LR
 | 항목 | 내용 |
 |------|------|
 | **프로젝트 목표** | v0.4 → v0.5 버전업 + LLM 대화 메모리 PoC |
-| **핵심 인사이트** | AI Gateway는 메모리 미내장 → ExtProc로 직접 구현 |
+| **핵심 인사이트** | AI Gateway는 메모리 미내장 → Custom ExtProc + Redis로 직접 구현 |
+| **v0.5 전환 이유** | GatewayConfig와 ExtProc 기반으로 메모리 PoC를 붙이기 쉬운 구조 제공 |
 | **활용 기능** | Body Mutation, GatewayConfig, External Processor |
-| **기술 스택** | Go/Python ExtProc + Redis (세션 스토어) |
+| **기술 스택** | Go Memory ExtProc + Redis (세션 스토어) |
 
 ---
 
