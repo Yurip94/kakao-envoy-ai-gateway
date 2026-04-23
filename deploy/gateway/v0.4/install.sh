@@ -5,7 +5,7 @@ AIGW_VERSION="${AIGW_VERSION:-v0.4.0}"
 EG_VERSION="${EG_VERSION:-v1.5.0}"
 EG_NAMESPACE="${EG_NAMESPACE:-envoy-gateway-system}"
 AIGW_NAMESPACE="${AIGW_NAMESPACE:-envoy-ai-gateway-system}"
-EG_CONFIG_URL="${EG_CONFIG_URL:-https://raw.githubusercontent.com/envoyproxy/ai-gateway/${AIGW_VERSION}/manifests/envoy-gateway-config/config.yaml}"
+EG_CONFIG_URL="${EG_CONFIG_URL:-https://raw.githubusercontent.com/envoyproxy/ai-gateway/${AIGW_VERSION}/manifests/envoy-gateway-values.yaml}"
 
 echo "Installing Envoy Gateway ${EG_VERSION}"
 helm upgrade -i eg oci://docker.io/envoyproxy/gateway-helm \

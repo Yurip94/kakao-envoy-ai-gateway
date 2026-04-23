@@ -9,8 +9,20 @@ PORT_FORWARD_PORT="${PORT_FORWARD_PORT:-8080}"
 
 kubectl apply -f "https://raw.githubusercontent.com/envoyproxy/ai-gateway/${AIGW_VERSION}/examples/basic/basic.yaml"
 
-kubectl wait pods --timeout=2m \
-  -l "gateway.envoyproxy.io/owning-gateway-name=${GATEWAY_NAME}" \
+for _ in {1..30}; do
+  POD_COUNT="$(
+    kubectl get pods -n "${EG_NAMESPACE}" \
+      -l "gateway.envoyproxy.io/owning-gateway-name=${GATEWAY_NAME},gateway.envoyproxy.io/owning-gateway-namespace=${GATEWAY_NAMESPACE}" \
+      --no-headers 2>/dev/null | wc -l | tr -d ' '
+  )"
+  if [[ "${POD_COUNT}" != "0" ]]; then
+    break
+  fi
+  sleep 2
+done
+
+kubectl wait pods --timeout=3m \
+  -l "gateway.envoyproxy.io/owning-gateway-name=${GATEWAY_NAME},gateway.envoyproxy.io/owning-gateway-namespace=${GATEWAY_NAMESPACE}" \
   -n "${EG_NAMESPACE}" \
   --for=condition=Ready
 
