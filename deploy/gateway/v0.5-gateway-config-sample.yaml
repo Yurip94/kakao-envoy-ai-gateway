@@ -1,0 +1,92 @@
+# Envoy AI Gateway v0.5 target sample using GatewayConfig.
+# This is the migration target for deploy/gateway/v0.4-sample.yaml.
+# Verify the installed CRD apiVersion in the target cluster before applying.
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: GatewayConfig
+metadata:
+  name: memory-enabled-config
+  namespace: ai-gateway-system
+spec:
+  extProc:
+    env:
+      - name: REDIS_URL
+        value: "redis://redis-master.ai-gateway-system.svc.cluster.local:6379"
+      - name: MEMORY_TTL_SECONDS
+        value: "3600"
+      - name: MAX_HISTORY_LENGTH
+        value: "20"
+      - name: SESSION_HEADER
+        value: "x-session-id"
+      - name: REDIS_FAILURE_POLICY
+        value: "fail-open"
+      - name: MISSING_SESSION_POLICY
+        value: "pass-through"
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "512Mi"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ai-gateway
+  namespace: ai-gateway-system
+  annotations:
+    aigateway.envoyproxy.io/gateway-config: memory-enabled-config
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openai-compatible-backend
+  namespace: ai-gateway-system
+spec:
+  endpoints:
+    - fqdn:
+        hostname: generativelanguage.googleapis.com
+        port: 443
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: AIServiceBackend
+metadata:
+  name: openai-compatible-ai-backend
+  namespace: ai-gateway-system
+spec:
+  schema:
+    name: OpenAI
+    prefix: "/v1beta/openai"
+  backendRef:
+    name: openai-compatible-backend
+    kind: Backend
+    group: gateway.envoyproxy.io
+  # Example v0.5 body mutation. Memory message merging is handled by the custom ExtProc.
+  bodyMutation:
+    set:
+      - path: "service_tier"
+        value: '"standard"'
+    remove:
+      - "internal_debug"
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: AIGatewayRoute
+metadata:
+  name: openai-compatible-route
+  namespace: ai-gateway-system
+spec:
+  parentRefs:
+    - name: ai-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - backendRefs:
+        - name: openai-compatible-ai-backend
+          weight: 1

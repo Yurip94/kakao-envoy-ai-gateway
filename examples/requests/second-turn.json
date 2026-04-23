@@ -1,0 +1,9 @@
+{
+  "model": "gpt-4o-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": "내 이름이 뭐라고 했지?"
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+# Envoy AI Gateway v0.4 baseline sample.
+# This project starts from this greenfield v0.4-style baseline, then migrates
+# the same intent to the v0.5 target manifest.
+# Do not use this as the final v0.5 manifest.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: ai-gateway
+  namespace: ai-gateway-system
+spec:
+  gatewayClassName: envoy-gateway
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openai-compatible-backend
+  namespace: ai-gateway-system
+spec:
+  endpoints:
+    - fqdn:
+        hostname: generativelanguage.googleapis.com
+        port: 443
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: AIServiceBackend
+metadata:
+  name: openai-compatible-ai-backend
+  namespace: ai-gateway-system
+spec:
+  schema:
+    name: OpenAI
+    # v0.4 baseline: this path prefix will move to schema.prefix in v0.5.
+    version: "/v1beta/openai"
+  backendRef:
+    name: openai-compatible-backend
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: AIGatewayRoute
+metadata:
+  name: openai-compatible-route
+  namespace: ai-gateway-system
+spec:
+  parentRefs:
+    - name: ai-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  # v0.4 baseline: these resources move to GatewayConfig.spec.extProc.resources in v0.5.
+  filterConfig:
+    externalProcessor:
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+  rules:
+    - backendRefs:
+        - name: openai-compatible-ai-backend
+          weight: 1
