@@ -207,3 +207,92 @@ Memory ExtProc가 GatewayConfig 기반으로 붙는지 검증
 - `x-session-id` 누락 시 임시 세션을 만들지, 오류로 처리할지 여부
 - ExtProc에서 response body까지 처리할 때 AI Gateway/Envoy 설정상 필요한 processing mode
 
+## 추가 논의 - v0.5 전환 이유와 Redis 메모리 역할
+
+### 사용자의 질문
+
+사용자는 Envoy AI Gateway v0.4에서 v0.5로 마이그레이션하는 이유가 메모리 기능이 없어서라고 이해하고 있었고, 현재 구현한 Redis가 메모리 역할을 하는 것이 맞는지 확인했다.
+
+### 정리한 답변
+
+Redis가 메모리 저장소 역할을 하는 것은 맞다.
+다만 Redis 혼자서 LLM 대화 메모리 기능 전체를 제공하는 것은 아니다.
+
+역할은 다음처럼 나뉜다.
+
+```text
+Envoy AI Gateway
+= LLM 요청/응답이 지나가는 관문
+
+Memory ExtProc
+= 요청/응답 중간에서 대화 메모리 로직을 실행하는 커스텀 처리기
+
+Redis
+= 세션별 대화 히스토리를 저장하는 저장소
+```
+
+비유하면 다음과 같다.
+
+```text
+Redis = 기억을 보관하는 창고
+Memory ExtProc = 창고에서 꺼내고 넣는 직원
+Envoy AI Gateway = 모든 요청이 지나가는 출입문
+```
+
+따라서 이 프로젝트의 메모리 기능은 Redis 하나가 아니라 다음 조합으로 구현된다.
+
+```text
+Memory Feature = Envoy AI Gateway v0.5 확장 기능 + Custom ExtProc + Redis
+```
+
+### v0.5로 가는 정확한 이유
+
+Envoy AI Gateway v0.5로 가는 이유는 v0.5가 대화 메모리 기능을 내장해서가 아니다.
+v0.5는 대화 메모리를 직접 구현해서 붙이기 좋은 확장 구조를 제공하기 때문에 전환한다.
+
+핵심 이유는 다음과 같이 정리했다.
+
+1. Custom ExtProc 기반으로 메모리 로직을 Gateway 요청/응답 흐름에 붙일 수 있다.
+2. Redis를 통해 세션별 대화 히스토리 저장소를 직접 구현할 수 있다.
+3. GatewayConfig를 통해 ExtProc 환경변수와 리소스 설정을 관리하기 쉬워진다.
+4. v0.4의 deprecated 설정을 v0.5 방식으로 전환하는 마이그레이션 검증이 필요하다.
+
+더 정확한 프로젝트 설명 문장은 다음과 같다.
+
+> Envoy AI Gateway v0.5로 가는 이유는 Custom ExtProc를 활용해 Redis 기반 대화 메모리 기능을 직접 구현할 수 있고, GatewayConfig를 통해 ExtProc의 환경변수와 리소스 설정을 관리하기 쉬워졌기 때문이다.
+
+추가로 다음 문장도 함께 사용할 수 있다.
+
+> 또한 v0.4의 일부 설정 방식이 deprecated 되었기 때문에, v0.5 기준 구조로 전환하는 마이그레이션 검증도 필요하다.
+
+### 현재 구현 위치
+
+Seed 8에서 구현한 Redis Store는 다음 범위까지 완료했다.
+
+```text
+세션 ID 기준으로
+대화 메시지를 Redis에 저장하고
+다시 불러오는 기능
+```
+
+아직 남은 부분은 다음이다.
+
+```text
+Envoy AI Gateway 요청 중간에 끼어들어서
+Redis에서 히스토리를 꺼내고
+현재 messages와 합친 뒤
+LLM 요청 body를 바꾸는 Memory ExtProc 구현
+```
+
+현재 진행 상태를 쉽게 표현하면 다음과 같다.
+
+```text
+메모리 창고(Redis)는 만들었고,
+이제 Gateway 요청 흐름에서 그 창고를 실제로 사용하는 ExtProc 직원을 만들 차례다.
+```
+
+### 후속 반영 후보
+
+- README의 프로젝트 목표 또는 핵심 정리에 v0.5 전환 이유를 더 정확히 반영한다.
+- `docs/architecture.md`에 Redis, Memory ExtProc, Envoy AI Gateway의 역할 구분을 추가한다.
+- `docs/migration-v0.4-to-v0.5.md`에 "v0.5가 메모리를 제공하는 것이 아니라 메모리 구현 기반을 제공한다"는 문장을 추가한다.

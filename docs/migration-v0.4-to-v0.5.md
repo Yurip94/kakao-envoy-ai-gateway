@@ -43,6 +43,10 @@ Baseline 파일:
 
 - `deploy/gateway/v0.4-sample.yaml`
 
+실행 계획:
+
+- `docs/v0.4-baseline-plan.md`
+
 이 파일은 우리가 처음부터 만드는 v0.4 출발점입니다.
 v0.5에서 deprecated 되는 설정을 의도적으로 포함해, 이후 target과 비교할 수 있게 합니다.
 
