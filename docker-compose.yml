@@ -1,0 +1,18 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  memory-extproc:
+    build: .
+    ports:
+      - "50051:50051"
+    environment:
+      REDIS_URL: redis://redis:6379
+      MEMORY_TTL_SECONDS: "3600"
+      MAX_HISTORY_LENGTH: "20"
+      REDIS_FAILURE_POLICY: fail-open
+      MISSING_SESSION_POLICY: pass-through
+    depends_on:
+      - redis

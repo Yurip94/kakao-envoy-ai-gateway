@@ -1,40 +1,46 @@
 # Envoy AI Gateway v0.5 target sample using GatewayConfig.
 # This is the migration target for deploy/gateway/v0.4-sample.yaml.
 # Verify the installed CRD apiVersion in the target cluster before applying.
+#
+# Apply order:
+#   1. deploy/redis/values.yaml              (Redis in default namespace)
+#   2. deploy/memory-extproc/deployment.yaml  (memory-extproc Deployment + Service)
+#   3. this file                              (GatewayConfig, Gateway, Backend, AIServiceBackend, AIGatewayRoute, EnvoyExtensionPolicy)
 ---
 apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: GatewayConfig
 metadata:
   name: memory-enabled-config
-  namespace: ai-gateway-system
+  namespace: default
 spec:
   extProc:
-    env:
-      - name: REDIS_URL
-        value: "redis://redis-master.ai-gateway-system.svc.cluster.local:6379"
-      - name: MEMORY_TTL_SECONDS
-        value: "3600"
-      - name: MAX_HISTORY_LENGTH
-        value: "20"
-      - name: SESSION_HEADER
-        value: "x-session-id"
-      - name: REDIS_FAILURE_POLICY
-        value: "fail-open"
-      - name: MISSING_SESSION_POLICY
-        value: "pass-through"
-    resources:
-      requests:
-        cpu: "100m"
-        memory: "128Mi"
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
+    kubernetes:
+      env:
+        - name: REDIS_URL
+          value: "redis://redis-master.default.svc.cluster.local:6379"
+        - name: MEMORY_TTL_SECONDS
+          value: "3600"
+        - name: MAX_HISTORY_LENGTH
+          value: "20"
+        - name: SESSION_HEADER
+          value: "x-session-id"
+        - name: REDIS_FAILURE_POLICY
+          value: "fail-open"
+        - name: MISSING_SESSION_POLICY
+          value: "pass-through"
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: ai-gateway
-  namespace: ai-gateway-system
+  namespace: default
   annotations:
     aigateway.envoyproxy.io/gateway-config: memory-enabled-config
 spec:
@@ -48,7 +54,7 @@ apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: Backend
 metadata:
   name: openai-compatible-backend
-  namespace: ai-gateway-system
+  namespace: default
 spec:
   endpoints:
     - fqdn:
@@ -59,7 +65,7 @@ apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: AIServiceBackend
 metadata:
   name: openai-compatible-ai-backend
-  namespace: ai-gateway-system
+  namespace: default
 spec:
   schema:
     name: OpenAI
@@ -80,7 +86,7 @@ apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: AIGatewayRoute
 metadata:
   name: openai-compatible-route
-  namespace: ai-gateway-system
+  namespace: default
 spec:
   parentRefs:
     - name: ai-gateway
@@ -90,3 +96,26 @@ spec:
     - backendRefs:
         - name: openai-compatible-ai-backend
           weight: 1
+---
+# EnvoyExtensionPolicy: connects our custom memory-extproc gRPC server to Envoy.
+# GatewayConfig.spec.extProc only configures the AI Gateway built-in ExtProc container
+# (env vars, resources). Connecting a custom ExtProc requires EnvoyExtensionPolicy.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: memory-extproc-policy
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ai-gateway
+  extProc:
+    - backendRefs:
+        - name: memory-extproc
+          port: 50051
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: Buffered

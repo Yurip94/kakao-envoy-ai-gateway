@@ -1,0 +1,57 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-extproc
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: memory-extproc
+  template:
+    metadata:
+      labels:
+        app: memory-extproc
+    spec:
+      containers:
+        - name: memory-extproc
+          image: memory-extproc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 50051
+              protocol: TCP
+          env:
+            - name: REDIS_URL
+              value: "redis://redis-master.default.svc.cluster.local:6379"
+            - name: MEMORY_TTL_SECONDS
+              value: "3600"
+            - name: MAX_HISTORY_LENGTH
+              value: "20"
+            - name: SESSION_HEADER
+              value: "x-session-id"
+            - name: REDIS_FAILURE_POLICY
+              value: "fail-open"
+            - name: MISSING_SESSION_POLICY
+              value: "pass-through"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: memory-extproc
+  namespace: default
+spec:
+  selector:
+    app: memory-extproc
+  ports:
+    - name: grpc
+      protocol: TCP
+      port: 50051
+      targetPort: 50051
