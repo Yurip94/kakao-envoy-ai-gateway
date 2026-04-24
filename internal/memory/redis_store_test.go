@@ -105,6 +105,33 @@ func TestRedisStoreLoadAppliesLimit(t *testing.T) {
 	}
 }
 
+func TestRedisStoreTTLExpirationRemovesHistory(t *testing.T) {
+	ctx := context.Background()
+	store, server := newTestRedisStore(t)
+
+	sessionID := "session-ttl"
+	messages := []openai.Message{
+		{Role: "user", Content: []byte(`"short lived"`)},
+	}
+
+	if err := store.Append(ctx, sessionID, messages, time.Second, 10); err != nil {
+		t.Fatalf("Append returned error: %v", err)
+	}
+	if !server.Exists(RedisSessionKey(sessionID)) {
+		t.Fatal("expected key to exist before ttl expiration")
+	}
+
+	server.FastForward(2 * time.Second)
+
+	got, err := store.Load(ctx, sessionID, 10)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected expired history to be empty, got %d messages", len(got))
+	}
+}
+
 func TestRedisStoreRejectsMissingSessionID(t *testing.T) {
 	ctx := context.Background()
 	store, _ := newTestRedisStore(t)
