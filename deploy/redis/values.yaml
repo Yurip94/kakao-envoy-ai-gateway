@@ -1,0 +1,11 @@
+# Redis helm values for PoC environment (bitnami/redis)
+# Install: helm upgrade -i redis bitnami/redis -n default -f deploy/redis/values.yaml
+auth:
+  enabled: false
+
+replica:
+  replicaCount: 0
+
+master:
+  persistence:
+    enabled: false
