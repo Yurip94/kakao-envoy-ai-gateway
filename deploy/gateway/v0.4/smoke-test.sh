@@ -5,7 +5,7 @@ AIGW_VERSION="${AIGW_VERSION:-v0.4.0}"
 EG_NAMESPACE="${EG_NAMESPACE:-envoy-gateway-system}"
 GATEWAY_NAME="${GATEWAY_NAME:-envoy-ai-gateway-basic}"
 GATEWAY_NAMESPACE="${GATEWAY_NAMESPACE:-default}"
-PORT_FORWARD_PORT="${PORT_FORWARD_PORT:-8080}"
+PORT_FORWARD_PORT="${PORT_FORWARD_PORT:-18080}"
 
 kubectl apply -f "https://raw.githubusercontent.com/envoyproxy/ai-gateway/${AIGW_VERSION}/examples/basic/basic.yaml"
 
