@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"strings"
 
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 	"github.com/redis/go-redis/v9"
@@ -36,7 +37,11 @@ func main() {
 	defer redisClient.Close()
 
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
-		log.Fatalf("failed to connect redis: %v", err)
+		if strings.EqualFold(cfg.RedisFailurePolicy, "fail-open") {
+			log.Printf("warn: failed to connect redis during startup, continuing because redis_failure_policy=fail-open: %v", err)
+		} else {
+			log.Fatalf("failed to connect redis: %v", err)
+		}
 	}
 
 	store := memory.NewRedisStore(redisClient)
