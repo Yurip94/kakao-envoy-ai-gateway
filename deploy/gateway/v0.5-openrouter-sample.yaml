@@ -1,0 +1,140 @@
+# Envoy AI Gateway v0.5 OpenRouter sample.
+#
+# This sample connects the existing Redis + memory-extproc PoC to OpenRouter's
+# OpenAI-compatible Chat Completions API.
+#
+# Prerequisites:
+#   1. Redis is deployed in the default namespace.
+#   2. memory-extproc Deployment + Service is deployed in the default namespace.
+#   3. The OpenRouter API key is stored as a Kubernetes Secret:
+#      kubectl create secret generic openrouter-api-key \
+#        -n default \
+#        --from-literal=apiKey="$OPENROUTER_API_KEY"
+#
+# Do not commit real API keys.
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: GatewayConfig
+metadata:
+  name: openrouter-memory-config
+  namespace: default
+spec:
+  extProc:
+    kubernetes:
+      env:
+        - name: REDIS_URL
+          value: "redis://redis-master.default.svc.cluster.local:6379"
+        - name: MEMORY_TTL_SECONDS
+          value: "3600"
+        - name: MAX_HISTORY_LENGTH
+          value: "20"
+        - name: SESSION_HEADER
+          value: "x-session-id"
+        - name: REDIS_FAILURE_POLICY
+          value: "fail-open"
+        - name: MISSING_SESSION_POLICY
+          value: "pass-through"
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: openrouter-ai-gateway
+  namespace: default
+  annotations:
+    aigateway.envoyproxy.io/gateway-config: openrouter-memory-config
+spec:
+  gatewayClassName: envoy-ai-gateway-basic
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openrouter-backend
+  namespace: default
+spec:
+  endpoints:
+    - fqdn:
+        hostname: openrouter.ai
+        port: 443
+  tls:
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: openrouter-ca
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: AIServiceBackend
+metadata:
+  name: openrouter-ai-backend
+  namespace: default
+spec:
+  schema:
+    name: OpenAI
+    prefix: "/api/v1"
+  backendRef:
+    name: openrouter-backend
+    kind: Backend
+    group: gateway.envoyproxy.io
+---
+# BackendSecurityPolicy reads the Secret key named "apiKey" and injects it into
+# the upstream Authorization header for this AIServiceBackend.
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: BackendSecurityPolicy
+metadata:
+  name: openrouter-api-key-policy
+  namespace: default
+spec:
+  type: APIKey
+  apiKey:
+    secretRef:
+      name: openrouter-api-key
+  targetRefs:
+    - group: aigateway.envoyproxy.io
+      kind: AIServiceBackend
+      name: openrouter-ai-backend
+---
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: AIGatewayRoute
+metadata:
+  name: openrouter-route
+  namespace: default
+spec:
+  parentRefs:
+    - name: openrouter-ai-gateway
+      kind: Gateway
+      group: gateway.networking.k8s.io
+  rules:
+    - backendRefs:
+        - name: openrouter-ai-backend
+          weight: 1
+---
+# EnvoyExtensionPolicy connects our custom memory-extproc gRPC server to Envoy.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: openrouter-memory-extproc-policy
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: openrouter-ai-gateway
+  extProc:
+    - backendRefs:
+        - name: memory-extproc
+          port: 50051
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: Buffered

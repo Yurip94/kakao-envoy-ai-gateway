@@ -1,0 +1,10 @@
+{
+  "model": "openai/gpt-4o-mini",
+  "stream": false,
+  "messages": [
+    {
+      "role": "user",
+      "content": "방금 내가 내 이름을 뭐라고 했지?"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "model": "openai/gpt-4o-mini",
+  "stream": false,
+  "messages": [
+    {
+      "role": "user",
+      "content": "내 이름은 카카오 게이트웨이 테스트 사용자야. 짧게 인사해줘."
+    }
+  ]
+}

@@ -17,6 +17,8 @@
 
 > 프로젝트 목적을 비유로 쉽게 설명한 문서는 [`docs/project-purpose-simple.md`](docs/project-purpose-simple.md)를 참고합니다.
 > 운영 전 점검 항목은 [`docs/ops-checklist.md`](docs/ops-checklist.md)를 참고합니다.
+> v0.5 메모리 PoC 재현 절차는 [`docs/reproduce-v05-memory-poc.md`](docs/reproduce-v05-memory-poc.md)를 참고합니다.
+> OpenRouter 실제 Provider 연동 절차는 [`docs/openrouter-provider.md`](docs/openrouter-provider.md)를 참고합니다.
 
 ### 1.1 배경
 

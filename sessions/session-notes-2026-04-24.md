@@ -141,10 +141,100 @@ v0.5 smoke test → HTTP 200 ✅
 
 ## 남은 작업
 
-- 커밋 단위 분리 및 PR 준비
 - Streaming/SSE 응답 메모리 처리 별도 설계
 - Long-term/Semantic Memory 후속 설계
 - 운영 수준 인증/인가, 관측성, Redis HA 정책 구체화
+
+## PR merge 이후 진행
+
+### main 기준 다음 Seed 선정
+
+PR #1 merge 이후 다음 Seed 후보를 `docs/next-seeds.md`에 정리했다.
+
+추천 순서:
+
+1. Seed 9: PoC 재현 절차 문서화
+2. Seed 10: Streaming/SSE 메모리 처리 설계
+3. Seed 11: 재현 절차 자동화 스크립트
+4. Seed 12: 운영 정책 구체화
+
+### Seed 9: PoC 재현 절차 문서화
+
+- `docs/reproduce-v05-memory-poc.md` 신규 작성
+- README에서 재현 문서 링크 추가
+- 포함 내용:
+  - 도구 전제 조건
+  - Kind 클러스터 생성
+  - Envoy Gateway v1.6.x 설치
+  - Envoy AI Gateway v0.5.0 설치
+  - mock backend smoke 리소스 적용
+  - Redis 배포
+  - memory-extproc 이미지 빌드 및 Kind 로드
+  - EnvoyExtensionPolicy 연결
+  - `x-session-id` 기반 2-turn E2E 검증
+  - Redis 저장 순서 확인
+  - 문제 해결 항목
+
+### Seed 10: OpenRouter 실제 Provider 연동 준비
+
+- OpenRouter를 실제 Provider 후보로 확정했다.
+- 이유:
+  - OpenAI-compatible Chat Completions API를 제공한다.
+  - 현재 PoC가 다루는 `messages`, `model`, `stream: false` 구조와 잘 맞는다.
+  - Gateway + Custom ExtProc + Redis 흐름을 mock이 아니라 실제 LLM 호출로 검증할 수 있다.
+- 신규 파일:
+  - `deploy/gateway/v0.5-openrouter-sample.yaml`
+  - `examples/requests/openrouter-first-turn.json`
+  - `examples/requests/openrouter-second-turn.json`
+  - `docs/openrouter-provider.md`
+- README에서 OpenRouter 연동 문서 링크 추가
+- API 키는 저장소에 남기지 않고 `openrouter-api-key` Kubernetes Secret의 `apiKey` key로 주입하는 방식으로 정리했다.
+- 현재 범위:
+  - non-streaming, `stream: false` 기준
+  - 실제 API key가 있는 환경에서 2-turn 메모리 검증 가능하도록 문서화
+- 범위 밖:
+  - Streaming/SSE 응답 저장
+  - 운영 수준 Secret rotation
+  - 모델별 비용/권한 정책 완성
+- 실제 검증 중 발견:
+  - OpenRouter 직접 호출은 성공
+  - Gateway 경유 OpenRouter 호출도 Backend CA 설정 후 HTTP 200 성공
+  - Redis에는 `user -> assistant -> user -> assistant` 순서로 저장됨
+  - 단, 두 번째 요청에서 히스토리 주입이 실제 OpenRouter upstream body에 반영되지 않는 것으로 보여 별도 이슈로 기록
+  - 이슈 파일: `docs/issues/2026-04-24-openrouter-memory-injection-not-reflected.md`
+
+### OpenRouter 실제 검증 상세 정리
+
+사용자가 OpenRouter API key를 준비했고, 키는 채팅이나 저장소에 남기지 않고 Kubernetes Secret으로만 생성했다.
+
+```bash
+kubectl create secret generic openrouter-api-key \
+  -n default \
+  --from-literal=apiKey="$OPENROUTER_API_KEY"
+```
+
+진행 결과:
+
+- `openrouter-api-key` Secret 생성 확인
+- `deploy/gateway/v0.5-openrouter-sample.yaml` 적용
+- OpenRouter backend 인증 정책 `BackendSecurityPolicy` Accepted 확인
+- Gateway 경유 실제 OpenRouter 호출 HTTP 200 확인
+- client가 `Authorization`을 직접 보내지 않아도 Secret 기반 인증 주입으로 호출 성공 확인
+- Redis 저장 확인
+
+발견한 연결 이슈:
+
+- OpenRouter backend를 단순 `openrouter.ai:443`로만 설정하면 HTTPS 포트에 plain HTTP가 전달되어 400 발생
+- `BackendTLSPolicy`만으로는 현재 AI Gateway `Backend`에 TLS가 충분히 적용되지 않아 `Backend.spec.tls.caCertificateRefs`를 사용
+- 로컬 Kind 환경에서 OpenRouter 인증서 체인을 `openrouter-ca` ConfigMap으로 주입해야 정상 호출 가능
+- 포트포워딩 테스트에서는 `Host: openrouter.ai` 헤더가 필요
+
+현재 남은 핵심 이슈:
+
+- Gateway 경유 OpenRouter 실제 호출과 Redis 저장은 성공
+- 그러나 두 번째 요청이 첫 번째 대화를 기억하지 못함
+- Redis에는 히스토리가 저장되어 있으므로 저장 경로보다는 request body mutation이 upstream 최종 요청에 반영되지 않는 문제로 추정
+- 다음 단계는 custom `memory-extproc` request mutation과 built-in AI Gateway ExtProc 처리 순서 확인
 
 ## 후속 재검증
 
