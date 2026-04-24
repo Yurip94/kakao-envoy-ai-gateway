@@ -81,23 +81,26 @@ apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: GatewayConfig
 metadata:
   name: memory-enabled-config
+  namespace: default
 spec:
   extProc:
-    env:
-      - name: REDIS_URL
-        value: "redis://redis-master.ai-gateway-system.svc.cluster.local:6379"
-    resources:
-      requests:
-        cpu: "100m"
-        memory: "128Mi"
-      limits:
-        cpu: "500m"
-        memory: "512Mi"
+    kubernetes:
+      env:
+        - name: REDIS_URL
+          value: "redis://redis-master.default.svc.cluster.local:6379"
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: ai-gateway
+  namespace: default
   annotations:
     aigateway.envoyproxy.io/gateway-config: memory-enabled-config
 ```
@@ -137,22 +140,42 @@ kubectl explain gatewayconfig.spec --api-version=aigateway.envoyproxy.io/v1alpha
 예상 결과:
 
 - `GatewayConfig` CRD가 존재해야 합니다.
-- `spec.extProc.env`와 `spec.extProc.resources`가 설명되어야 합니다.
+- `spec.extProc.kubernetes.env`와 `spec.extProc.kubernetes.resources`가 설명되어야 합니다.
+- 확인 명령: `kubectl explain gatewayconfig.spec.extProc.kubernetes`
 
 ### 3. GatewayConfig 생성
 
-기존 `filterConfig.externalProcessor.resources`에 있던 resource requests/limits를 `GatewayConfig.spec.extProc.resources`로 옮깁니다.
+기존 `filterConfig.externalProcessor.resources`에 있던 resource requests/limits를 `GatewayConfig.spec.extProc.kubernetes.resources`로 옮깁니다.
+
+> ⚠️ **주의**: 공식 문서 예시와 달리 실제 v0.5.0 CRD 스키마는 `spec.extProc.kubernetes` 하위에 `env`와 `resources`가 있습니다.
+> 적용 전 반드시 `kubectl explain gatewayconfig.spec.extProc.kubernetes`로 확인하세요.
+> 관련 이슈: `docs/issues/2026-04-24-gatewayconfig-extproc-schema.md`
 
 Memory ExtProc PoC에 필요한 값도 같은 곳에 둡니다.
 
 ```yaml
-env:
-  - name: REDIS_URL
-    value: "redis://redis-master.ai-gateway-system.svc.cluster.local:6379"
-  - name: MEMORY_TTL_SECONDS
-    value: "3600"
-  - name: MAX_HISTORY_LENGTH
-    value: "20"
+apiVersion: aigateway.envoyproxy.io/v1alpha1
+kind: GatewayConfig
+metadata:
+  name: memory-enabled-config
+  namespace: default
+spec:
+  extProc:
+    kubernetes:
+      env:
+        - name: REDIS_URL
+          value: "redis://redis-master.default.svc.cluster.local:6379"
+        - name: MEMORY_TTL_SECONDS
+          value: "3600"
+        - name: MAX_HISTORY_LENGTH
+          value: "20"
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "128Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
 ```
 
 ### 4. Gateway에서 GatewayConfig 참조
@@ -225,9 +248,49 @@ gateway.gateway.networking.k8s.io/ai-gateway configured (server dry run)
 backend.gateway.envoyproxy.io/openai-compatible-backend configured (server dry run)
 aiservicebackend.aigateway.envoyproxy.io/openai-compatible-ai-backend configured (server dry run)
 aigatewayroute.aigateway.envoyproxy.io/openai-compatible-route configured (server dry run)
+envoyextensionpolicy.gateway.envoyproxy.io/memory-extproc-policy configured (server dry run)
 ```
 
 실제 CRD schema가 샘플과 다르면 설치된 Envoy AI Gateway v0.5 CRD를 우선합니다.
+
+## GatewayConfig vs EnvoyExtensionPolicy 역할 구분
+
+v0.5에서 ExtProc 관련 설정은 목적에 따라 두 CRD로 나뉩니다.
+
+| CRD | 역할 |
+|-----|------|
+| `GatewayConfig.spec.extProc` | AI Gateway **내장** ExtProc 컨테이너의 환경변수·리소스 설정 |
+| `EnvoyExtensionPolicy` | **커스텀** gRPC ExtProc 서비스를 Envoy에 연결 |
+
+즉 `GatewayConfig`만으로는 우리 memory-extproc gRPC 서버를 Envoy에 연결할 수 없습니다.
+`EnvoyExtensionPolicy`로 backendRefs에 memory-extproc Service를 지정해야 합니다.
+
+```yaml
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: memory-extproc-policy
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: ai-gateway
+  extProc:
+    - backendRefs:
+        - name: memory-extproc
+          port: 50051
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: Buffered
+```
+
+배포 순서:
+
+1. `deploy/memory-extproc/deployment.yaml` — memory-extproc Deployment + Service
+2. `deploy/gateway/v0.5-gateway-config-sample.yaml` — GatewayConfig, Gateway, Backend, AIServiceBackend, AIGatewayRoute, EnvoyExtensionPolicy
 
 ## Baseline에서 Target으로 비교할 항목
 
@@ -235,7 +298,7 @@ aigatewayroute.aigateway.envoyproxy.io/openai-compatible-route configured (serve
 - v0.4 baseline에는 `schema.version`이 있고 v0.5 target에는 `schema.prefix`가 있어야 합니다.
 - v0.5 target에는 `GatewayConfig`와 Gateway annotation이 있어야 합니다.
 - Gateway namespace와 GatewayConfig namespace가 일치해야 합니다.
-- Memory ExtProc 환경변수는 v0.5 target의 `GatewayConfig.spec.extProc.env`에 있어야 합니다.
+- v0.5 target에는 `EnvoyExtensionPolicy`로 memory-extproc Service를 연결합니다.
 - Body Mutation은 provider 또는 route의 top-level JSON 필드 변경 용도로만 사용해야 합니다.
 
 ## 완료 기준
@@ -245,11 +308,13 @@ aigatewayroute.aigateway.envoyproxy.io/openai-compatible-route configured (serve
 - v0.5 target에는 `filterConfig.externalProcessor.resources`가 없습니다.
 - v0.5 target에는 `schema.version`이 없습니다.
 - Gateway가 `aigateway.envoyproxy.io/gateway-config` annotation을 사용합니다.
-- GatewayConfig에 Memory ExtProc 관련 환경변수가 있습니다.
 - `schema.prefix`가 OpenAI 호환 endpoint prefix를 표현합니다.
+- `EnvoyExtensionPolicy`가 memory-extproc Service(port 50051)를 참조합니다.
+- memory-extproc Deployment + Service 매니페스트가 `deploy/memory-extproc/`에 존재합니다.
 
 ## 참고 자료
 
 - [Envoy AI Gateway v0.5 Release Notes](https://aigateway.envoyproxy.io/release-notes/v0.5/)
 - [Gateway Configuration](https://aigateway.envoyproxy.io/docs/0.5/capabilities/gateway-config/)
 - [Header and Body Mutations](https://aigateway.envoyproxy.io/docs/capabilities/traffic/header-body-mutations/)
+- [Envoy Gateway External Processing](https://gateway.envoyproxy.io/docs/tasks/extensibility/ext-proc/)

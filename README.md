@@ -15,6 +15,9 @@
 
 ## 1. 프로젝트 개요
 
+> 프로젝트 목적을 비유로 쉽게 설명한 문서는 [`docs/project-purpose-simple.md`](docs/project-purpose-simple.md)를 참고합니다.
+> 운영 전 점검 항목은 [`docs/ops-checklist.md`](docs/ops-checklist.md)를 참고합니다.
+
 ### 1.1 배경
 
 **Envoy AI Gateway v0.5**로 버전업하고, 이를 활용하여 **LLM 대화 메모리 기능**을 구현합니다.
@@ -591,8 +594,8 @@ helm install eg oci://docker.io/envoyproxy/gateway-helm \
 helm install aieg oci://docker.io/envoyproxy/ai-gateway-helm \
   --version v0.5.0 -n ai-gateway-system --create-namespace
 
-# Redis 설치
-helm install redis bitnami/redis -n ai-gateway-system
+# Redis 설치 (PoC 애플리케이션 리소스는 default namespace 기준)
+helm install redis bitnami/redis -n default -f deploy/redis/values.yaml
 ```
 
 ### 7.2 Step 2: GatewayConfig 설정
@@ -602,9 +605,17 @@ apiVersion: aigateway.envoyproxy.io/v1alpha1
 kind: GatewayConfig
 metadata:
   name: memory-enabled-config
+  namespace: default
 spec:
   extProc:
     kubernetes:
+      env:
+        - name: REDIS_URL
+          value: "redis://redis-master.default.svc.cluster.local:6379"
+        - name: MEMORY_TTL_SECONDS
+          value: "3600"
+        - name: MAX_HISTORY_LENGTH
+          value: "20"
       resources:
         requests:
           cpu: "100m"
@@ -612,18 +623,12 @@ spec:
         limits:
           cpu: "500m"
           memory: "512Mi"
-      env:
-        - name: REDIS_URL
-          value: "redis://redis-master:6379"
-        - name: MEMORY_TTL_SECONDS
-          value: "3600"
-        - name: MAX_HISTORY_LENGTH
-          value: "20"
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
   name: ai-gateway
+  namespace: default
   annotations:
     aigateway.envoyproxy.io/gateway-config: memory-enabled-config
 spec:
