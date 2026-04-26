@@ -1,0 +1,93 @@
+# Envoy Gateway direct OpenRouter sample (workaround path).
+#
+# This sample bypasses AIGatewayRoute/AIServiceBackend and routes directly:
+#   HTTPRoute -> Backend(openrouter.ai)
+# with custom memory-extproc attached by EnvoyExtensionPolicy.
+#
+# Why this exists:
+# - In this repository's current state, OpenRouter path through
+#   AIGatewayRoute -> AIServiceBackend has a known issue where memory body
+#   mutation is not reflected upstream.
+# - This direct route is a practical fallback that keeps Redis + custom
+#   memory-extproc behavior working end-to-end.
+#
+# Prerequisites:
+#   1. Redis and memory-extproc are deployed in the default namespace.
+#   2. openrouter-ca ConfigMap exists in default namespace.
+#   3. Client sends Authorization header:
+#      Authorization: Bearer <OPENROUTER_API_KEY>
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: openrouter-direct-gateway
+  namespace: default
+spec:
+  gatewayClassName: test-gateway-class
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: Backend
+metadata:
+  name: openrouter-backend
+  namespace: default
+spec:
+  endpoints:
+    - fqdn:
+        hostname: openrouter.ai
+        port: 443
+  tls:
+    caCertificateRefs:
+      - group: ""
+        kind: ConfigMap
+        name: openrouter-ca
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: openrouter-direct-route
+  namespace: default
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: openrouter-direct-gateway
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/chat/completions
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /api/v1/chat/completions
+      backendRefs:
+        - group: gateway.envoyproxy.io
+          kind: Backend
+          name: openrouter-backend
+          port: 443
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyExtensionPolicy
+metadata:
+  name: openrouter-direct-memory-extproc-policy
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: openrouter-direct-gateway
+  extProc:
+    - backendRefs:
+        - name: memory-extproc
+          port: 50051
+      processingMode:
+        request:
+          body: Buffered
+        response:
+          body: Buffered

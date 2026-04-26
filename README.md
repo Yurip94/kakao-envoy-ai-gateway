@@ -19,6 +19,9 @@
 > 운영 전 점검 항목은 [`docs/ops-checklist.md`](docs/ops-checklist.md)를 참고합니다.
 > v0.5 메모리 PoC 재현 절차는 [`docs/reproduce-v05-memory-poc.md`](docs/reproduce-v05-memory-poc.md)를 참고합니다.
 > OpenRouter 실제 Provider 연동 절차는 [`docs/openrouter-provider.md`](docs/openrouter-provider.md)를 참고합니다.
+> Upstage Direct Provider 연동 절차는 [`docs/upstage-provider.md`](docs/upstage-provider.md)를 참고합니다.
+> OpenRouter + Upstage 이원화 구성은 [`docs/dual-provider-setup.md`](docs/dual-provider-setup.md)를 참고합니다.
+> 전체 추진 경과/문제해결/남은 과제를 포함한 통합 발자취 보고서는 [`docs/project-journey-report.md`](docs/project-journey-report.md)를 참고합니다.
 
 ### 1.1 배경
 

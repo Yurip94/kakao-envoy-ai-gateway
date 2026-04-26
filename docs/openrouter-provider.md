@@ -118,7 +118,7 @@ curl -sS \
   http://localhost:18085/v1/chat/completions
 ```
 
-두 번째 요청입니다. 이 요청에서는 `memory-extproc`가 Redis에 저장된 첫 번째 대화를 `messages`에 합쳐 OpenRouter로 보냅니다.
+두 번째 요청입니다.
 
 ```bash
 curl -sS \
@@ -144,6 +144,72 @@ assistant 첫 번째 응답
 user      두 번째 요청
 assistant 두 번째 응답
 ```
+
+주의:
+
+- Redis에 위 순서대로 저장되는 것과 "OpenRouter upstream에 병합 body가 최종 반영되는 것"은 다를 수 있습니다.
+- 2026-04-26 기준으로 OpenRouter `AIGatewayRoute -> AIServiceBackend` 경로에서는 Turn 2가 Turn 1을 기억하지 못하는 미해결 이슈가 있습니다.
+- 최신 상태는 `docs/issues/2026-04-26-body-mutation-content-length-blocked.md`를 참고합니다.
+
+## 동작 가능한 우회 경로 (검증 완료)
+
+아래 우회 경로는 2026-04-26 기준으로 실제 OpenRouter 2-turn 메모리 동작을 확인했습니다.
+
+```text
+HTTPRoute -> Backend(openrouter.ai) + URLRewrite(/v1 -> /api/v1)
+  + EnvoyExtensionPolicy(custom memory-extproc)
+```
+
+적용:
+
+```bash
+kubectl apply -f deploy/gateway/v0.5-openrouter-direct-sample.yaml
+```
+
+이 경로에서는 API 키를 클라이언트 요청 헤더로 직접 전달합니다.
+
+```bash
+export OPENROUTER_API_KEY="sk-or-..."
+```
+
+```bash
+OPENROUTER_DIRECT_GATEWAY_SERVICE="$(
+  kubectl get svc -n envoy-gateway-system \
+    --selector=gateway.envoyproxy.io/owning-gateway-namespace=default,gateway.envoyproxy.io/owning-gateway-name=openrouter-direct-gateway \
+    -o jsonpath='{.items[0].metadata.name}'
+)"
+
+kubectl port-forward -n envoy-gateway-system \
+  "svc/${OPENROUTER_DIRECT_GATEWAY_SERVICE}" \
+  18087:80
+```
+
+```bash
+kubectl exec -n default redis-master-0 -- \
+  redis-cli DEL "memory:session:openrouter-direct-demo:messages"
+
+curl -sS \
+  -H "Content-Type: application/json" \
+  -H "Host: openrouter.ai" \
+  -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+  -H "x-session-id: openrouter-direct-demo" \
+  --data @examples/requests/openrouter-first-turn.json \
+  http://localhost:18087/v1/chat/completions
+
+curl -sS \
+  -H "Content-Type: application/json" \
+  -H "Host: openrouter.ai" \
+  -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+  -H "x-session-id: openrouter-direct-demo" \
+  --data @examples/requests/openrouter-second-turn.json \
+  http://localhost:18087/v1/chat/completions
+```
+
+검증 기준:
+
+- Turn 2 응답이 Turn 1의 사용자 이름을 맞히면 성공
+- OpenRouter 응답의 `usage.prompt_tokens`가 Turn 1 대비 증가하면 성공
+- Redis에는 `user -> assistant -> user -> assistant` 순서로 저장되어야 함
 
 ## 문제 해결
 
@@ -181,6 +247,13 @@ assistant 두 번째 응답
 - `x-session-id` 헤더가 요청에 포함되어 있는지 확인합니다.
 - `memory-extproc` 로그에서 request body, response body 처리 오류를 확인합니다.
 - 현재 PoC는 `stream: false`를 기준으로 검증합니다. Streaming/SSE 응답 저장은 후속 Seed에서 별도로 설계합니다.
+
+### Redis에는 저장되는데 OpenRouter가 이전 turn을 기억하지 못함
+
+- 현재 알려진 미해결 케이스입니다.
+- `memory-extproc` 로그에 `merged_msgs`가 증가해도 OpenRouter 응답이 이전 turn을 반영하지 않을 수 있습니다.
+- 이 경우 `docs/issues/2026-04-26-body-mutation-content-length-blocked.md`의 재검증 절차를 따라, `echo-backend` 경유 검증과 OpenRouter 경유 검증을 분리해 확인합니다.
+- 우선 기능 검증이 급하면 `deploy/gateway/v0.5-openrouter-direct-sample.yaml` 우회 경로를 사용합니다.
 
 ## 참고 자료
 

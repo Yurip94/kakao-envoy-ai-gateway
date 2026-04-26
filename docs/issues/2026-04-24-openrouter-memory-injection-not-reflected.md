@@ -31,16 +31,20 @@ assistant
 - OpenRouter 실제 Provider 연결은 성공했지만, 실제 Provider 경유 end-to-end 메모리 검증은 아직 완료되지 않았다.
 - Redis 저장 경로는 동작하지만, request body mutation이 OpenRouter upstream 요청에 반영되는지 추가 검증이 필요하다.
 
-## 원인 (확정)
+## 원인 (재평가 필요)
 
-Envoy가 ExtProc `CONTINUE_AND_REPLACE` body mutation을 적용할 때, 원래 요청의 `content-length` 헤더와 교체된 body 크기가 맞지 않으면 두 가지 결과 중 하나가 발생한다.
+초기에는 `content-length` 불일치를 주원인으로 판단했지만, 2026-04-26 재검증에서 이 결론은 보류됐다.
 
-1. ExtProc가 `content-length` HeaderMutation으로 직접 업데이트를 시도하면: Envoy가 해당 HeaderMutation을 거부(`rejected_header_mutations` 증가)하고, body mutation도 함께 무시된다. upstream에는 원본 body가 전달된다.
-2. ExtProc가 body만 교체하고 `content-length`를 업데이트하지 않으면: Envoy가 `mismatch_between_content_length_and_the_length_of_the_mutated_body` 에러로 500을 반환한다.
+- 같은 custom extproc 코드로 `HTTPRoute -> echo-backend` 경로에서는 body mutation이 실제 upstream에 반영된다.
+- OpenRouter `AIGatewayRoute -> AIServiceBackend` 경로에서만 메모리 주입이 최종 upstream에 반영되지 않는 증상이 반복된다.
+
+따라서 현 시점 우선 가설은 `content-length` 단독 이슈보다, AI Gateway 내장 처리 경로(내장 ext_proc/후속 body 재구성)와 custom extproc의 상호작용 문제다.
 
 ## 해결
 
-`internal/extproc/processor.go`의 RequestHeaders 처리 단계에서 세션 ID가 있을 때 `content-length` 헤더를 미리 제거한다. body mutation이 적용될 때 Envoy가 새 body 크기를 기준으로 `content-length`를 자동으로 계산하게 된다.
+해결 전 상태다.
+
+`internal/extproc/processor.go`에서 request headers 단계에 `content-length` 제거 시도를 넣어둔 상태이지만, OpenRouter `AIGatewayRoute` 경로의 미반영 문제는 아직 남아 있다.
 
 ```go
 // RequestHeaders 처리
@@ -81,7 +85,11 @@ Redis 저장:
 {"role":"assistant","content":"May the Force be with you."}
 ```
 
-body mutation이 upstream에 실제 반영되는 것을 `mutated_body_len` 로그와 HTTP 200 응답으로 확인했다.
+이 결과는 "custom extproc body mutation 자체는 가능하다"를 보여주지만, OpenRouter AIGatewayRoute 경로 문제를 해결했다는 근거는 아니다.
+
+최신 추적 내용은 아래 문서를 기준으로 본다.
+
+- `docs/issues/2026-04-26-body-mutation-content-length-blocked.md`
 
 ## 관련 파일
 
