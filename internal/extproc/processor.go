@@ -9,7 +9,6 @@ import (
 	"log"
 	"strings"
 
-	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 
 	"github.com/Yurip94/kakao-envoy-ai-gateway/internal/memory"
@@ -68,7 +67,7 @@ func (p *Processor) handleRequest(ctx context.Context, req *extprocv3.Processing
 			}
 			return continueRequestHeaders(), ctx, nil
 		}
-		return continueRequestHeaders(), context.WithValue(ctx, sessionIDContextKey{}, sessionID), nil
+		return continueRequestHeadersRemoveContentLength(), context.WithValue(ctx, sessionIDContextKey{}, sessionID), nil
 
 	case *extprocv3.ProcessingRequest_RequestBody:
 		return p.handleRequestBody(ctx, v.RequestBody)
@@ -106,6 +105,7 @@ func (p *Processor) handleRequestBody(ctx context.Context, body *extprocv3.HttpB
 		}
 		history = nil
 	}
+	log.Printf("debug: session=%s history_len=%d", sessionID, len(history))
 
 	rawBody := body.GetBody()
 	chatReq, err := openai.ParseChatRequest(rawBody)
@@ -120,6 +120,7 @@ func (p *Processor) handleRequestBody(ctx context.Context, body *extprocv3.HttpB
 		log.Printf("warn: request body mutation failed (pass-through): %v", err)
 		return continueRequestBody(nil), ctx, nil
 	}
+	log.Printf("debug: session=%s incoming_msgs=%d merged_msgs=%d mutated_body_len=%d", sessionID, len(chatReq.Messages), len(merged), len(mutatedBody))
 
 	userMessages := filterByRole(chatReq.Messages, "user")
 	if len(userMessages) > 0 {
@@ -237,6 +238,21 @@ func continueRequestHeaders() *extprocv3.ProcessingResponse {
 	}
 }
 
+func continueRequestHeadersRemoveContentLength() *extprocv3.ProcessingResponse {
+	return &extprocv3.ProcessingResponse{
+		Response: &extprocv3.ProcessingResponse_RequestHeaders{
+			RequestHeaders: &extprocv3.HeadersResponse{
+				Response: &extprocv3.CommonResponse{
+					Status: extprocv3.CommonResponse_CONTINUE,
+					HeaderMutation: &extprocv3.HeaderMutation{
+						RemoveHeaders: []string{"content-length"},
+					},
+				},
+			},
+		},
+	}
+}
+
 func continueResponseHeaders() *extprocv3.ProcessingResponse {
 	return &extprocv3.ProcessingResponse{
 		Response: &extprocv3.ProcessingResponse_ResponseHeaders{
@@ -258,16 +274,6 @@ func continueRequestBody(mutatedBody []byte) *extprocv3.ProcessingResponse {
 		common.BodyMutation = &extprocv3.BodyMutation{
 			Mutation: &extprocv3.BodyMutation_Body{
 				Body: mutatedBody,
-			},
-		}
-		common.HeaderMutation = &extprocv3.HeaderMutation{
-			SetHeaders: []*corev3.HeaderValueOption{
-				{
-					Header: &corev3.HeaderValue{
-						Key:   "content-length",
-						Value: fmt.Sprintf("%d", len(mutatedBody)),
-					},
-				},
 			},
 		}
 	}

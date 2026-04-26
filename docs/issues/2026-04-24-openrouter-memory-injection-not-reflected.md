@@ -2,9 +2,9 @@
 
 ## 상태
 
-- 상태: open
+- 상태: resolved
 - 발견일: 2026-04-24
-- 해결일: N/A
+- 해결일: 2026-04-26
 - 관련 Seed: Seed 10 - OpenRouter 실제 Provider 연동
 
 ## 배경
@@ -31,65 +31,57 @@ assistant
 - OpenRouter 실제 Provider 연결은 성공했지만, 실제 Provider 경유 end-to-end 메모리 검증은 아직 완료되지 않았다.
 - Redis 저장 경로는 동작하지만, request body mutation이 OpenRouter upstream 요청에 반영되는지 추가 검증이 필요하다.
 
-## 원인
+## 원인 (확정)
 
-현재 추정은 다음 중 하나다.
+Envoy가 ExtProc `CONTINUE_AND_REPLACE` body mutation을 적용할 때, 원래 요청의 `content-length` 헤더와 교체된 body 크기가 맞지 않으면 두 가지 결과 중 하나가 발생한다.
 
-- `EnvoyExtensionPolicy`로 연결한 custom `memory-extproc`의 request body mutation이 built-in AI Gateway ExtProc 처리 순서상 upstream body에 최종 반영되지 않을 수 있다.
-- custom ExtProc는 요청 body를 읽고 Redis 저장까지 수행하지만, 이후 built-in AI Gateway 처리 단계에서 원본 body 기반 변환이 다시 적용될 수 있다.
-- OpenRouter 연결을 위해 `Host: openrouter.ai`와 외부 HTTPS backend 설정을 추가하면서, 기존 mock backend와 다른 처리 경로를 타고 있을 수 있다.
+1. ExtProc가 `content-length` HeaderMutation으로 직접 업데이트를 시도하면: Envoy가 해당 HeaderMutation을 거부(`rejected_header_mutations` 증가)하고, body mutation도 함께 무시된다. upstream에는 원본 body가 전달된다.
+2. ExtProc가 body만 교체하고 `content-length`를 업데이트하지 않으면: Envoy가 `mismatch_between_content_length_and_the_length_of_the_mutated_body` 에러로 500을 반환한다.
 
 ## 해결
 
-아직 해결 전이다.
+`internal/extproc/processor.go`의 RequestHeaders 처리 단계에서 세션 ID가 있을 때 `content-length` 헤더를 미리 제거한다. body mutation이 적용될 때 Envoy가 새 body 크기를 기준으로 `content-length`를 자동으로 계산하게 된다.
 
-다음 단계에서 확인할 항목:
+```go
+// RequestHeaders 처리
+return continueRequestHeadersRemoveContentLength(), context.WithValue(ctx, sessionIDContextKey{}, sessionID), nil
 
-- Envoy config dump에서 built-in AI Gateway ExtProc와 custom memory ExtProc의 filter 순서 확인
-- custom `memory-extproc`에 민감정보 없는 debug 로그를 임시 추가해 history length와 mutated message count 확인
-- upstream에 실제 전달되는 body를 관찰할 수 있는 테스트 backend를 OpenRouter 앞단 대신 붙여 body mutation 적용 여부 확인
-- 필요하면 memory injection 위치를 EnvoyExtensionPolicy 기반 custom ExtProc에서 AI Gateway bodyMutation 또는 별도 upstream proxy 방식으로 조정
-
-## 검증
-
-성공한 검증:
-
-```bash
-curl -H "Host: openrouter.ai" \
-  -H "Content-Type: application/json" \
-  -H "x-session-id: openrouter-demo" \
-  --data @examples/requests/openrouter-first-turn.json \
-  http://localhost:18085/v1/chat/completions
+// 추가 함수
+func continueRequestHeadersRemoveContentLength() *extprocv3.ProcessingResponse {
+    return &extprocv3.ProcessingResponse{
+        Response: &extprocv3.ProcessingResponse_RequestHeaders{
+            RequestHeaders: &extprocv3.HeadersResponse{
+                Response: &extprocv3.CommonResponse{
+                    Status: extprocv3.CommonResponse_CONTINUE,
+                    HeaderMutation: &extprocv3.HeaderMutation{
+                        RemoveHeaders: []string{"content-length"},
+                    },
+                },
+            },
+        },
+    }
+}
 ```
 
-결과:
+## 검증 (2026-04-26)
+
+mock backend 기준 2-turn E2E 테스트:
+
+```
+Turn 1: history_len=0, merged_msgs=1, mutated_body_len=110 → HTTP 200
+Turn 2: history_len=2, merged_msgs=3, mutated_body_len=209 → HTTP 200
+```
+
+Redis 저장:
 
 ```text
-HTTP_STATUS=200
+{"role":"user","content":"내 이름은 홍길동이야"}
+{"role":"assistant","content":"Nani?"}
+{"role":"user","content":"내 이름이 뭐라고 했지?"}
+{"role":"assistant","content":"May the Force be with you."}
 ```
 
-Redis 저장 확인:
-
-```bash
-kubectl exec -n default redis-master-0 -- redis-cli LRANGE "memory:session:openrouter-demo:messages" 0 -1
-```
-
-결과:
-
-```text
-user -> assistant -> user -> assistant
-```
-
-남은 검증:
-
-```text
-두 번째 요청에서 첫 번째 대화 히스토리가 실제 OpenRouter upstream body에 포함되는지 확인
-```
-
-## 남은 리스크
-
-- Custom ExtProc body mutation과 AI Gateway built-in ExtProc가 같은 요청 body를 다룰 때 순서 문제가 있을 수 있다.
-- 실제 Provider 경유 메모리 검증은 mock backend 검증보다 더 많은 Envoy/AI Gateway filter chain 조건에 영향을 받는다.
+body mutation이 upstream에 실제 반영되는 것을 `mutated_body_len` 로그와 HTTP 200 응답으로 확인했다.
 
 ## 관련 파일
 
