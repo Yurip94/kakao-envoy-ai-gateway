@@ -2,9 +2,9 @@
 
 ## 상태
 
-- 상태: resolved
+- 상태: open (재개 — mock backend는 항상 고정 응답을 반환하므로 body 반영 여부를 검증할 수 없었음. 실제 미해결 상태)
 - 발견일: 2026-04-24
-- 해결일: 2026-04-26
+- 해결일: N/A
 - 관련 Seed: Seed 10 - OpenRouter 실제 Provider 연동
 
 ## 배경
